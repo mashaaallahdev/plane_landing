@@ -12,6 +12,14 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Fix for Pillow 10+ where Image.ANTIALIAS was removed for MoviePy
+try:
+    from PIL import Image
+    if not hasattr(Image, "ANTIALIAS"):
+        Image.ANTIALIAS = getattr(Image, "Resampling", Image).LANCZOS
+except ImportError:
+    pass
+
 from telegram import Bot
 from src.config import (
     TELEGRAM_BOT_TOKEN,

@@ -9,6 +9,10 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 
+# Compatibility fix for Pillow 10+ where Image.ANTIALIAS was removed
+if not hasattr(Image, "ANTIALIAS"):
+    Image.ANTIALIAS = getattr(Image, "Resampling", Image).LANCZOS
+
 import moviepy.editor as mp
 from moviepy.video.fx.all import crop, resize
 

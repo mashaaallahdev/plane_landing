@@ -16,6 +16,7 @@ output/*.mp4
 output/*.jpg
 output/*.png
 bin/
+*TEMP_MPY*
 
 # Keep directories with .gitkeep
 !data/quran_cache/.gitkeep
