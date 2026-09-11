@@ -11,7 +11,9 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     CommandHandler,
+    MessageHandler,
     ContextTypes,
+    filters,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -266,6 +268,8 @@ class PlaneQuranBot:
 
     async def cmd_generate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /generate and /generate <surah> [start_ayah] [end_ayah] for instant on-demand creation."""
+        user_info = f"{update.effective_user.first_name} (ID: {update.effective_user.id})" if update.effective_user else "unknown"
+        logger.info(f"cmd_generate invoked by {user_info} with args={context.args}")
         # Parse optional arguments
         surah_info = None
         surah_num = None
@@ -410,6 +414,30 @@ class PlaneQuranBot:
             f"Successfully produced and sent {success_count}/{DAILY_GENERATION_COUNT} Reels."
         )
 
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle plain text messages so users can type commands without a leading slash (e.g. 'generate 2 1 7')."""
+        if not update.message or not update.message.text:
+            return
+        raw_text = update.message.text.strip()
+        user_info = f"{update.effective_user.first_name} (ID: {update.effective_user.id})" if update.effective_user else "unknown"
+        logger.info(f"Received text message from {user_info}: '{raw_text}'")
+
+        lower = raw_text.lower()
+        if lower.startswith("generate"):
+            parts = raw_text.split()[1:]
+            context.args = parts
+            await self.cmd_generate(update, context)
+        elif lower.startswith("surah") or lower.startswith("list"):
+            parts = raw_text.split()[1:]
+            context.args = parts
+            await self.cmd_surahs(update, context)
+        elif lower == "status":
+            await self.cmd_status(update, context)
+        elif lower in ("help", "start"):
+            await self.cmd_start(update, context)
+        elif lower.startswith("daily_batch"):
+            await self.cmd_daily_batch(update, context)
+
     def build_app(self) -> Application:
         """Builds and configures the Telegram Application instance."""
         if not TELEGRAM_BOT_TOKEN:
@@ -418,7 +446,7 @@ class PlaneQuranBot:
         logger.info("Initializing Telegram Bot Application...")
         app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(self.post_init).build()
 
-        # Register handlers
+        # Register command handlers (e.g. /generate, /start)
         app.add_handler(CommandHandler("start", self.cmd_start))
         app.add_handler(CommandHandler("help", self.cmd_help))
         app.add_handler(CommandHandler("status", self.cmd_status))
@@ -426,6 +454,9 @@ class PlaneQuranBot:
         app.add_handler(CommandHandler("surahs", self.cmd_surahs))
         app.add_handler(CommandHandler("list", self.cmd_surahs))
         app.add_handler(CommandHandler("daily_batch", self.cmd_daily_batch))
+
+        # Register plain text handler (e.g. "generate 2 1 7", "status", "surahs")
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_text_message))
 
         return app
 
