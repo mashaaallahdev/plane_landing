@@ -369,6 +369,10 @@ class VideoComposer:
         safe_bitrate = max(1800, min(target_bitrate_kbps, 4000))
         bitrate_str = f"{safe_bitrate}k"
 
+        # Force garbage collection before encoding to give FFmpeg maximum RAM headroom
+        import gc
+        gc.collect()
+
         logger.info(f"Rendering video to {output_file} at {VIDEO_FPS} fps (Bitrate: {bitrate_str})...")
         final_video.write_videofile(
             str(output_file),
@@ -377,8 +381,9 @@ class VideoComposer:
             audio_codec="aac",
             bitrate=bitrate_str,
             audio_bitrate="192k",
-            preset="fast",
-            threads=4,
+            preset="veryfast",
+            threads=2,
+            ffmpeg_params=["-max_muxing_queue_size", "1024"],
             logger=None,  # Suppress internal MoviePy stdout clutter
         )
 
