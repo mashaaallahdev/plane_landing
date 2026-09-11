@@ -54,17 +54,35 @@ async def start_background_bot(app):
     """Background task to start the Telegram bot when the web server begins."""
     global bot_instance
     if TELEGRAM_BOT_TOKEN:
-        logger.info("Starting Telegram Bot & Scheduler background worker...")
-        bot_instance = PlaneQuranBot()
-        loop = asyncio.get_running_loop()
-        # Run Telegram Bot in executor thread so it doesn't block the web server
-        app["bot_task"] = loop.run_in_executor(None, bot_instance.run)
+        try:
+            logger.info("Starting Telegram Bot & Scheduler background worker...")
+            bot_instance = PlaneQuranBot()
+            tg_app = bot_instance.build_app()
+            await tg_app.initialize()
+            await tg_app.start()
+            await tg_app.updater.start_polling(drop_pending_updates=False)
+            app["tg_app"] = tg_app
+            logger.info("Telegram Bot is actively polling for commands!")
+        except Exception as e:
+            logger.error(f"Failed to start Telegram Bot worker: {e}", exc_info=True)
     else:
         logger.warning("TELEGRAM_BOT_TOKEN not provided. Bot worker will not start.")
 
 async def cleanup_background_bot(app):
     """Cleanup when server stops."""
     logger.info("Stopping web server and background bot worker...")
+    tg_app = app.get("tg_app")
+    if tg_app:
+        try:
+            if tg_app.updater and tg_app.updater.running:
+                await tg_app.updater.stop()
+            if tg_app.running:
+                await tg_app.stop()
+            await tg_app.shutdown()
+            if bot_instance and bot_instance.scheduler.running:
+                bot_instance.scheduler.shutdown()
+        except Exception as e:
+            logger.error(f"Error during bot shutdown: {e}")
 
 def create_app():
     app = web.Application()

@@ -8,6 +8,7 @@ from datetime import datetime
 from telegram import Update, Bot
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -112,7 +113,10 @@ class PlaneQuranBot:
 
         logger.info("Executing scheduled Reel generation job...")
         try:
-            video_path, caption, q_data = self.generate_single_reel()
+            loop = asyncio.get_running_loop()
+            video_path, caption, q_data = await loop.run_in_executor(
+                None, self.generate_single_reel
+            )
             await self.send_reel_to_chat(
                 bot=bot,
                 chat_id=TELEGRAM_CHAT_ID,
@@ -122,6 +126,11 @@ class PlaneQuranBot:
             )
         except Exception as e:
             logger.error(f"Error during scheduled reel generation: {e}", exc_info=True)
+
+    async def post_init(self, application: Application):
+        """Hook called by python-telegram-bot after the application is initialized and event loop is running."""
+        logger.info("Bot application initialized. Setting up daily scheduler...")
+        self.setup_daily_schedule(application.bot)
 
     def setup_daily_schedule(self, bot: Bot):
         """
@@ -142,7 +151,11 @@ class PlaneQuranBot:
                 name=f"daily_reel_{hour:02d}{minute:02d}",
                 replace_existing=True,
             )
-        self.scheduler.start()
+        try:
+            if not self.scheduler.running:
+                self.scheduler.start()
+        except Exception as e:
+            logger.warning(f"Could not start scheduler immediately (will start when loop runs): {e}")
         logger.info(f"Configured {len(times)} daily automated generation triggers.")
 
     # ---------------- Telegram Command Handlers ----------------
@@ -397,13 +410,13 @@ class PlaneQuranBot:
             f"Successfully produced and sent {success_count}/{DAILY_GENERATION_COUNT} Reels."
         )
 
-    def run(self):
-        """Starts the Telegram bot application with polling and scheduler."""
+    def build_app(self) -> Application:
+        """Builds and configures the Telegram Application instance."""
         if not TELEGRAM_BOT_TOKEN:
             raise ValueError("TELEGRAM_BOT_TOKEN is not set. Please set it in your .env or environment.")
 
         logger.info("Initializing Telegram Bot Application...")
-        app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+        app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(self.post_init).build()
 
         # Register handlers
         app.add_handler(CommandHandler("start", self.cmd_start))
@@ -414,11 +427,13 @@ class PlaneQuranBot:
         app.add_handler(CommandHandler("list", self.cmd_surahs))
         app.add_handler(CommandHandler("daily_batch", self.cmd_daily_batch))
 
-        # Start daily 10x scheduler
-        self.setup_daily_schedule(app.bot)
+        return app
 
+    def run(self):
+        """Starts the Telegram bot application with polling and scheduler (standalone mode)."""
+        app = self.build_app()
         logger.info("Starting bot polling loop...")
-        app.run_polling(drop_pending_updates=True)
+        app.run_polling(drop_pending_updates=False)
 
 if __name__ == "__main__":
     logging.basicConfig(
