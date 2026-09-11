@@ -422,13 +422,15 @@ class PlaneQuranBot:
         user_info = f"{update.effective_user.first_name} (ID: {update.effective_user.id})" if update.effective_user else "unknown"
         logger.info(f"Received text message from {user_info}: '{raw_text}'")
 
-        lower = raw_text.lower()
+        cleaned = raw_text.lstrip("/!").strip()
+        lower = cleaned.lower()
+
         if lower.startswith("generate"):
-            parts = raw_text.split()[1:]
+            parts = cleaned.split()[1:]
             context.args = parts
             await self.cmd_generate(update, context)
         elif lower.startswith("surah") or lower.startswith("list"):
-            parts = raw_text.split()[1:]
+            parts = cleaned.split()[1:]
             context.args = parts
             await self.cmd_surahs(update, context)
         elif lower == "status":
@@ -437,6 +439,18 @@ class PlaneQuranBot:
             await self.cmd_start(update, context)
         elif lower.startswith("daily_batch"):
             await self.cmd_daily_batch(update, context)
+        else:
+            name = update.effective_user.first_name if update.effective_user else "Friend"
+            help_msg = (
+                f"السلام عليكم *{name}*! ✈️📖\n\n"
+                "To generate a 9:16 vertical Reel, send:\n"
+                "• `/generate` — Create random Reel\n"
+                "• `/generate 2 1 5` — Surah Al-Baqara, Ayahs 1 to 5\n"
+                "• `/generate 67 1 5` — Surah Al-Mulk, Ayahs 1 to 5\n"
+                "• `/surahs` — Search & browse all 114 Surahs\n"
+                "• `/status` — View bot uptime & stats"
+            )
+            await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
 
     def build_app(self) -> Application:
         """Builds and configures the Telegram Application instance."""

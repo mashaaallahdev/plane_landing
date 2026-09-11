@@ -48,6 +48,7 @@ async def handle_status(request):
         "bot_configured": bool(TELEGRAM_BOT_TOKEN),
         "total_generated": getattr(bot_instance, "total_generated", 0) if bot_instance else 0,
         "uptime": str(datetime.now() - bot_instance.start_time) if bot_instance else "0",
+        "version": "v1.4.0-direct-ffmpeg",
     })
 
 async def start_background_bot(app):
@@ -59,8 +60,10 @@ async def start_background_bot(app):
             bot_instance = PlaneQuranBot()
             tg_app = bot_instance.build_app()
             await tg_app.initialize()
-            await tg_app.start()
+            if tg_app.post_init:
+                await tg_app.post_init(tg_app)
             await tg_app.updater.start_polling(drop_pending_updates=False)
+            await tg_app.start()
             app["tg_app"] = tg_app
             logger.info("Telegram Bot is actively polling for commands!")
         except Exception as e:
