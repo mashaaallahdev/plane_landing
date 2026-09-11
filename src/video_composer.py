@@ -15,6 +15,18 @@ if not hasattr(Image, "ANTIALIAS"):
 
 import moviepy.editor as mp
 from moviepy.video.fx.all import crop, resize
+import moviepy.video.fx.resize as fx_resize
+
+# Ensure moviepy's internal resizer never crashes on Pillow 10+
+if hasattr(fx_resize, "resizer") and getattr(fx_resize.resizer, "origin", "") == "PIL":
+    def _patched_pil_resizer(pic, newsize):
+        newsize = list(map(int, newsize))[::-1]
+        pilim = Image.fromarray(pic)
+        resampling = getattr(Image, "Resampling", Image)
+        filt = getattr(resampling, "LANCZOS", getattr(Image, "ANTIALIAS", None))
+        resized_pil = pilim.resize(newsize[::-1], filt)
+        return np.array(resized_pil)
+    fx_resize.resizer = _patched_pil_resizer
 
 from src.config import (
     VIDEO_WIDTH,
