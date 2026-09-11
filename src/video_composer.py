@@ -177,21 +177,27 @@ def render_ayah_overlay(
         draw.text((x, cur_y), line, font=font_english, fill=(248, 250, 252, 255))
         cur_y += line_h_en
 
-    # 3. Watermark at Bottom Left
+    # 3. Watermark at Bottom Left (Semi-transparent so background content remains visible)
     watermark_path = ASSETS_DIR / "watermark.png"
     if watermark_path.exists():
         try:
             wm = Image.open(watermark_path).convert("RGBA")
-            wm_size = 140
+            wm_size = 130
             wm = wm.resize((wm_size, wm_size), Image.LANCZOS)
+
+            # Reduce opacity to ~45% for transparency
+            r, g, b, a = wm.split()
+            a = a.point(lambda p: int(p * 0.45))
+            wm_transparent = Image.merge("RGBA", (r, g, b, a))
+
             wm_x = 60
             wm_y = height - wm_size - 70
-            canvas.paste(wm, (wm_x, wm_y), wm)
+            canvas.paste(wm_transparent, (wm_x, wm_y), wm_transparent)
         except Exception as e:
             logger.warning(f"Failed to paste watermark: {e}")
     elif CHANNEL_TAG:
         bbox_tag = draw.textbbox((0, 0), CHANNEL_TAG, font=font_brand)
-        draw.text((60, height - 90), CHANNEL_TAG, font=font_brand, fill=(226, 232, 240, 200))
+        draw.text((60, height - 90), CHANNEL_TAG, font=font_brand, fill=(226, 232, 240, 160))
 
     return np.array(canvas)
 
