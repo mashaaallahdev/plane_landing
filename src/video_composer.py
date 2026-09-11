@@ -139,7 +139,7 @@ def render_ayah_overlay(
     - Custom Watermark at bottom-left
     """
     ensure_fonts()
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    canvas = create_gradient_mask(width, height)
     draw = ImageDraw.Draw(canvas)
 
     # Load fonts
@@ -328,11 +328,7 @@ class VideoComposer:
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 1. Gradient vignette overlay
-            grad_path = temp_dir / "gradient.png"
-            create_gradient_mask(VIDEO_WIDTH, VIDEO_HEIGHT).save(grad_path)
-
-            # 2. Render Ayah overlays via Pillow
+            # 1. Render Ayah overlays via Pillow (vignette gradient is baked in)
             ayah_inputs = []
             for i, a in enumerate(ayahs):
                 dur = max(0.1, a["end_time"] - a["start_time"])
@@ -347,6 +343,16 @@ class VideoComposer:
                 img.save(p)
                 ayah_inputs.append((p, dur))
 
+            # 2. Write subtitles playlist for FFmpeg concat demuxer
+            # Concat demuxer streams frames sequentially into memory on-demand (< 180MB RAM total)
+            subtitles_file = temp_dir / "subtitles.txt"
+            with open(subtitles_file, "w", encoding="utf-8") as f:
+                for p, dur in ayah_inputs:
+                    f.write(f"file '{p.resolve().as_posix()}'\n")
+                    f.write(f"duration {dur:.3f}\n")
+                if ayah_inputs:
+                    f.write(f"file '{ayah_inputs[-1][0].resolve().as_posix()}'\n")
+
             # 3. Dynamic bitrate for safe file size (<40MB)
             target_max_mb = 40.0
             target_bitrate_kbps = int((target_max_mb * 8 * 1024) / max(1.0, total_duration)) - 192
@@ -354,36 +360,29 @@ class VideoComposer:
             bitrate_str = f"{safe_bitrate}k"
 
             ffmpeg_exe = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+            fade_out_start = max(0.0, total_duration - 0.8)
+
             cmd = [
                 ffmpeg_exe, "-y",
+                "-threads", "2",
                 "-stream_loop", "-1",
                 "-i", str(video_path),
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(subtitles_file.resolve()),
                 "-i", str(quran_data["combined_audio_path"]),
-                "-loop", "1",
-                "-i", str(grad_path),
-            ]
-
-            for p, dur in ayah_inputs:
-                cmd.extend(["-loop", "1", "-t", f"{dur:.3f}", "-i", str(p)])
-
-            concat_ins = "".join([f"[{3+i}:v]" for i in range(len(ayah_inputs))])
-            fade_out_start = max(0.0, total_duration - 0.8)
-            
-            filters = [
-                f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},setsar=1[bg]",
-                f"{concat_ins}concat=n={len(ayah_inputs)}:v=1:a=0,format=rgba[subtitles]",
-                "[bg][2:v]overlay=0:0:shortest=1[bg_grad]",
-                "[bg_grad][subtitles]overlay=0:0[outv]",
-                f"[1:a]afade=t=in:ss=0:d=0.4,afade=t=out:st={fade_out_start:.3f}:d=0.8[a]",
-            ]
-
-            filter_str = ";".join(filters)
-
-            cmd.extend([
-                "-filter_complex", filter_str,
+                "-t", f"{total_duration:.3f}",
+                "-filter_complex_threads", "2",
+                "-filter_complex", (
+                    f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+                    f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},setsar=1,fps={VIDEO_FPS}[bg];"
+                    "[bg][1:v]overlay=0:0[outv];"
+                    f"[2:a]afade=t=in:ss=0:d=0.4,afade=t=out:st={fade_out_start:.3f}:d=0.8[a]"
+                ),
                 "-map", "[outv]",
                 "-map", "[a]",
-                "-t", f"{total_duration:.3f}",
+                "-r", str(VIDEO_FPS),
+                "-threads", "2",
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-b:v", bitrate_str,
@@ -392,11 +391,10 @@ class VideoComposer:
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
                 "-loglevel", "error",
-                "-threads", "0",
                 str(output_file)
-            ])
+            ]
 
-            logger.info(f"Rendering 9:16 vertical Reel via ultra-fast FFmpeg engine ({total_duration:.1f}s)...")
+            logger.info(f"Rendering 9:16 vertical Reel via ultra-fast FFmpeg concat demuxer ({total_duration:.1f}s)...")
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
             if res.returncode != 0:
                 logger.error(f"FFmpeg failed: {res.stderr[-500:]}")

@@ -48,7 +48,7 @@ async def handle_status(request):
         "bot_configured": bool(TELEGRAM_BOT_TOKEN),
         "total_generated": getattr(bot_instance, "total_generated", 0) if bot_instance else 0,
         "uptime": str(datetime.now() - bot_instance.start_time) if bot_instance else "0",
-        "version": "v1.4.0-direct-ffmpeg",
+        "version": "v1.5.0-concat-demuxer",
     })
 
 async def start_background_bot(app):

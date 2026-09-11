@@ -100,23 +100,33 @@ class VideoSourceProvider:
                 videos = data.get("videos", [])
                 if videos:
                     chosen = random.choice(videos)
-                    # Pick highest quality mp4 video file
+                    # Pick highest quality mp4 video file up to 1080p (exclude 4K UHD / 1440p to prevent Render OOM)
                     files = chosen.get("video_files", [])
                     mp4s = [f for f in files if f.get("file_type") == "video/mp4"]
                     if mp4s:
-                        # Sort by height / width descending
-                        mp4s.sort(key=lambda x: x.get("height", 0) * x.get("width", 0), reverse=True)
-                        target_file = mp4s[0]
+                        suitable = [
+                            f for f in mp4s
+                            if (f.get("height", 0) or 0) <= 1920 and (f.get("width", 0) or 0) <= 1920
+                        ]
+                        if suitable:
+                            suitable.sort(key=lambda x: (x.get("height", 0) or 0) * (x.get("width", 0) or 0), reverse=True)
+                            target_file = suitable[0]
+                        else:
+                            mp4s.sort(key=lambda x: (x.get("height", 0) or 0) * (x.get("width", 0) or 0))
+                            target_file = mp4s[0]
+
                         vurl = target_file.get("link")
                         vid_id = chosen.get("id")
                         dest = VIDEO_CACHE_DIR / f"pexels_{vid_id}.mp4"
                         if not dest.exists():
-                            logger.info(f"Downloading Pexels video {vid_id}...")
-                            vr = requests.get(vurl, timeout=30)
-                            if vr.ok:
-                                with open(dest, "wb") as f:
-                                    f.write(vr.content)
-                                return dest
+                            logger.info(f"Downloading Pexels video {vid_id} ({target_file.get('width')}x{target_file.get('height')})...")
+                            with requests.get(vurl, stream=True, timeout=45) as vr:
+                                if vr.ok:
+                                    with open(dest, "wb") as f:
+                                        for chunk in vr.iter_content(chunk_size=1024 * 1024):
+                                            if chunk:
+                                                f.write(chunk)
+                                    return dest
                         else:
                             return dest
         except Exception as e:
@@ -142,18 +152,20 @@ class VideoSourceProvider:
                 if hits:
                     chosen = random.choice(hits)
                     videos_dict = chosen.get("videos", {})
-                    # Prefer large or medium
-                    target_info = videos_dict.get("large") or videos_dict.get("medium")
+                    # Prefer medium (720p/1080p) over large/4k
+                    target_info = videos_dict.get("medium") or videos_dict.get("large") or videos_dict.get("small")
                     if target_info and target_info.get("url"):
                         vurl = target_info["url"]
                         dest = VIDEO_CACHE_DIR / f"pixabay_{chosen['id']}.mp4"
                         if not dest.exists():
                             logger.info(f"Downloading Pixabay video {chosen['id']}...")
-                            vr = requests.get(vurl, timeout=30)
-                            if vr.ok:
-                                with open(dest, "wb") as f:
-                                    f.write(vr.content)
-                                return dest
+                            with requests.get(vurl, stream=True, timeout=45) as vr:
+                                if vr.ok:
+                                    with open(dest, "wb") as f:
+                                        for chunk in vr.iter_content(chunk_size=1024 * 1024):
+                                            if chunk:
+                                                f.write(chunk)
+                                    return dest
                         else:
                             return dest
         except Exception as e:
@@ -169,14 +181,16 @@ class VideoSourceProvider:
 
         logger.info(f"Downloading curated aviation video '{video_entry['title']}'...")
         headers = {"User-Agent": "PlaneLandingQuranBot/1.0 (AviationQuranBot)"}
-        resp = requests.get(video_entry["url"], headers=headers, timeout=45)
-        if resp.ok and len(resp.content) > 10000:
-            with open(target_path, "wb") as f:
-                f.write(resp.content)
-            logger.info(f"Curated video cached to {target_path}")
-            return target_path
-        else:
-            raise RuntimeError(f"Failed to download curated video {video_entry['id']}: HTTP {resp.status_code}")
+        with requests.get(video_entry["url"], headers=headers, stream=True, timeout=45) as resp:
+            if resp.ok:
+                with open(target_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+                if target_path.stat().st_size > 10000:
+                    logger.info(f"Curated video cached to {target_path}")
+                    return target_path
+        raise RuntimeError(f"Failed to download curated video {video_entry['id']}")
 
     def get_cached_videos(self) -> List[Path]:
         """Return list of valid cached videos."""
