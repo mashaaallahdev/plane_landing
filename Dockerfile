@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-noto-core \
     fonts-liberation \
+    libraqm0 \
+    libfribidi0 \
+    libharfbuzz0b \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

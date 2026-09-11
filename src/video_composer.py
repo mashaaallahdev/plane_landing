@@ -3,7 +3,7 @@ import textwrap
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
@@ -43,16 +43,36 @@ from src.font_manager import ensure_fonts
 
 logger = logging.getLogger(__name__)
 
-# Reshaper instance with complete Harakat (Tashkeel) support
+from PIL import features
+
+HAS_RAQM = bool(features.check("raqm"))
+
+# Reshaper instance with complete Harakat (Tashkeel) support (fallback for systems without libraqm)
 arabic_reshaper_with_harakat = arabic_reshaper.ArabicReshaper(configuration={
     "delete_harakat": False,
     "support_ligatures": True,
 })
 
+def prepare_arabic_text(text: str) -> Tuple[str, Optional[str]]:
+    """
+    Prepares Arabic text for Pillow rendering across different environments:
+    - On Linux / Docker / GitHub Actions with libraqm: Pillow natively shapes (HarfBuzz)
+      and layouts (FriBidi) Arabic text right-to-left. Applying python-bidi or arabic_reshaper
+      causes double-bidi reversal resulting in mirrored/backwards text!
+      Therefore, we pass raw Arabic text with direction='rtl'.
+    - On Windows / systems without libraqm: Pillow's standard FreeType engine lacks complex
+      text layout, so we use arabic_reshaper and python-bidi to pre-shape and pre-reverse.
+    """
+    if HAS_RAQM:
+        return text, "rtl"
+    else:
+        reshaped = arabic_reshaper_with_harakat.reshape(text)
+        return get_display(reshaped), None
+
 def reshape_arabic(text: str) -> str:
-    """Reshape Arabic text preserving all harkat (tashkeel/diacritics)."""
-    reshaped = arabic_reshaper_with_harakat.reshape(text)
-    return get_display(reshaped)
+    """Legacy helper for non-directional contexts."""
+    res, _ = prepare_arabic_text(text)
+    return res
 
 def wrap_arabic_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
     """Wraps Arabic text properly according to measured pixel width with harkat."""
@@ -61,8 +81,11 @@ def wrap_arabic_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, dr
     current_line = []
     for word in words:
         test_line = " ".join(current_line + [word])
-        bidi = reshape_arabic(test_line)
-        bbox = draw.textbbox((0, 0), bidi, font=font)
+        line_to_draw, direction = prepare_arabic_text(test_line)
+        if direction:
+            bbox = draw.textbbox((0, 0), line_to_draw, font=font, direction=direction)
+        else:
+            bbox = draw.textbbox((0, 0), line_to_draw, font=font)
         if bbox[2] - bbox[0] <= max_width:
             current_line.append(word)
         else:
@@ -135,15 +158,21 @@ def render_ayah_overlay(
     clean_surah_ar = surah_name_ar.strip()
     if not (clean_surah_ar.startswith("سورة") or clean_surah_ar.startswith("سُورَةُ")):
         clean_surah_ar = f"سورة {clean_surah_ar}"
-    reshaped_surah_ar = reshape_arabic(clean_surah_ar)
+    
+    header_ar_text, header_dir = prepare_arabic_text(clean_surah_ar)
     
     # English title inside glass container
     draw.text((90, 122), title_en, font=font_header_title, fill=(255, 255, 255, 255))
     
     # Arabic Surah Name on the right inside glass container
-    bbox_ar = draw.textbbox((0, 0), reshaped_surah_ar, font=font_header_ar)
-    w_ar = bbox_ar[2] - bbox_ar[0]
-    draw.text((width - 90 - w_ar, 124), reshaped_surah_ar, font=font_header_ar, fill=(245, 158, 11, 255)) # Amber/Gold
+    if header_dir:
+        bbox_ar = draw.textbbox((0, 0), header_ar_text, font=font_header_ar, direction=header_dir)
+        w_ar = bbox_ar[2] - bbox_ar[0]
+        draw.text((width - 90 - w_ar, 124), header_ar_text, font=font_header_ar, fill=(245, 158, 11, 255), direction=header_dir)
+    else:
+        bbox_ar = draw.textbbox((0, 0), header_ar_text, font=font_header_ar)
+        w_ar = bbox_ar[2] - bbox_ar[0]
+        draw.text((width - 90 - w_ar, 124), header_ar_text, font=font_header_ar, fill=(245, 158, 11, 255))
 
     # Subtitle line: Ayah number + Reciter
     ayah_num = ayah_data.get("ayah_number", 1)
@@ -169,16 +198,25 @@ def render_ayah_overlay(
 
     # Draw Arabic text lines with Harkat (Centered with rich multi-directional shadow)
     for line in ar_lines:
-        reshaped = reshape_arabic(line)
-        bbox = draw.textbbox((0, 0), reshaped, font=font_arabic)
+        line_to_draw, direction = prepare_arabic_text(line)
+        if direction:
+            bbox = draw.textbbox((0, 0), line_to_draw, font=font_arabic, direction=direction)
+        else:
+            bbox = draw.textbbox((0, 0), line_to_draw, font=font_arabic)
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
 
         # Multi-layer outer shadow for high readability on any background
         for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2), (0, 3), (0, -3), (3, 0), (-3, 0)]:
-            draw.text((x + ox, cur_y + oy), reshaped, font=font_arabic, fill=(0, 0, 0, 240))
+            if direction:
+                draw.text((x + ox, cur_y + oy), line_to_draw, font=font_arabic, fill=(0, 0, 0, 240), direction=direction)
+            else:
+                draw.text((x + ox, cur_y + oy), line_to_draw, font=font_arabic, fill=(0, 0, 0, 240))
         # Warm ivory glowing Arabic text
-        draw.text((x, cur_y), reshaped, font=font_arabic, fill=(254, 249, 195, 255))
+        if direction:
+            draw.text((x, cur_y), line_to_draw, font=font_arabic, fill=(254, 249, 195, 255), direction=direction)
+        else:
+            draw.text((x, cur_y), line_to_draw, font=font_arabic, fill=(254, 249, 195, 255))
         cur_y += line_h_ar
 
     cur_y += 18
