@@ -17,6 +17,7 @@ from src.config import (
     VIDEO_HEIGHT,
     VIDEO_FPS,
     OUTPUT_DIR,
+    ASSETS_DIR,
     ARABIC_FONT_PATH,
     ENGLISH_FONT_PATH,
     CHANNEL_TAG,
@@ -96,97 +97,87 @@ def render_ayah_overlay(
     font_english = ImageFont.truetype(str(ENGLISH_FONT_PATH), 32)
     font_brand = ImageFont.truetype(str(ENGLISH_FONT_PATH), 22)
 
-    # 1. Top Header Badge (Frosted pill)
-    header_box = (60, 100, width - 60, 220)
-    draw.rounded_rectangle(header_box, radius=24, fill=(15, 23, 42, 190), outline=(255, 255, 255, 40), width=2)
-
-    # Header Text
-    # Surah Title in English & Arabic
+    # 1. Top Header Text (Directly rendered with drop shadows)
     title_en = f"SURAH {surah_name_en.upper()}"
     clean_surah_ar = surah_name_ar.strip()
     if not (clean_surah_ar.startswith("سورة") or clean_surah_ar.startswith("سُورَةُ")):
         clean_surah_ar = f"سورة {clean_surah_ar}"
     reshaped_surah_ar = get_display(arabic_reshaper.reshape(clean_surah_ar))
     
-    # Draw English part
-    draw.text((90, 122), title_en, font=font_header_title, fill=(255, 255, 255, 255))
+    # English title with shadow
+    draw.text((72, 112), title_en, font=font_header_title, fill=(0, 0, 0, 220))
+    draw.text((70, 110), title_en, font=font_header_title, fill=(255, 255, 255, 255))
     
-    # Draw Arabic Surah Name on the right side of header
+    # Arabic Surah Name on the right with shadow
     bbox_ar = draw.textbbox((0, 0), reshaped_surah_ar, font=font_header_ar)
     w_ar = bbox_ar[2] - bbox_ar[0]
-    draw.text((width - 90 - w_ar, 124), reshaped_surah_ar, font=font_header_ar, fill=(245, 158, 11, 255)) # Amber/Gold
+    draw.text((width - 70 - w_ar + 2, 112), reshaped_surah_ar, font=font_header_ar, fill=(0, 0, 0, 220))
+    draw.text((width - 70 - w_ar, 110), reshaped_surah_ar, font=font_header_ar, fill=(245, 158, 11, 255)) # Amber/Gold
 
     # Subtitle line: Ayah number + Reciter
     ayah_num = ayah_data.get("ayah_number", 1)
     sub_text = f"Ayah {ayah_num}  •  Reciter: {RECITER_NAME_EN}"
-    draw.text((90, 168), sub_text, font=font_header_sub, fill=(203, 213, 225, 230))
+    draw.text((72, 154), sub_text, font=font_header_sub, fill=(0, 0, 0, 220))
+    draw.text((70, 152), sub_text, font=font_header_sub, fill=(203, 213, 225, 230))
 
-    # 2. Main Quran Text Card (Lower Center, positioned comfortably)
+    # 2. Main Quran Text (Floating directly over footage with glow & drop shadows)
     arabic_raw = ayah_data.get("arabic_text", "")
     english_raw = ayah_data.get("english_text", "")
 
     # Wrap Arabic lines
-    ar_lines = wrap_arabic_text(arabic_raw, font_arabic, width - 200, draw)
+    ar_lines = wrap_arabic_text(arabic_raw, font_arabic, width - 160, draw)
     
     # Wrap English lines
     en_lines = textwrap.wrap(english_raw, width=42)
 
-    # Measure dynamic card height
-    line_h_ar = 75
+    line_h_ar = 80
     line_h_en = 44
-    content_h = (len(ar_lines) * line_h_ar) + 40 + (len(en_lines) * line_h_en) + 80
-    card_h = max(240, min(content_h, 850))
+    content_h = (len(ar_lines) * line_h_ar) + 20 + (len(en_lines) * line_h_en)
 
-    # Place card around y = 1100 to 1250 (leaving room above and below)
-    card_y1 = height - 320 - card_h
-    card_y2 = card_y1 + card_h
-    card_box = (50, card_y1, width - 50, card_y2)
+    # Position content at comfortable lower-center area
+    cur_y = height - 340 - content_h
 
-    # Draw stylish translucent card
-    draw.rounded_rectangle(
-        card_box,
-        radius=32,
-        fill=(10, 15, 26, 215),
-        outline=(255, 255, 255, 50),
-        width=2,
-    )
-
-    # Accent decorative top line for the card
-    draw.line([(width // 2 - 60, card_y1 + 18), (width // 2 + 60, card_y1 + 18)], fill=(245, 158, 11, 200), width=3)
-
-    # Draw Arabic text lines (Centered)
-    cur_y = card_y1 + 45
+    # Draw Arabic text lines (Centered with rich multi-directional shadow)
     for line in ar_lines:
         reshaped = get_display(arabic_reshaper.reshape(line))
         bbox = draw.textbbox((0, 0), reshaped, font=font_arabic)
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
 
-        # Soft drop shadow for glowing effect
-        draw.text((x + 2, cur_y + 2), reshaped, font=font_arabic, fill=(0, 0, 0, 180))
-        # Warm ivory / off-white Arabic text
+        # Multi-layer outer shadow for high readability on any sky/ground background
+        for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2), (0, 3), (0, -3), (3, 0), (-3, 0)]:
+            draw.text((x + ox, cur_y + oy), reshaped, font=font_arabic, fill=(0, 0, 0, 240))
+        # Warm ivory glowing Arabic text
         draw.text((x, cur_y), reshaped, font=font_arabic, fill=(254, 249, 195, 255))
         cur_y += line_h_ar
 
-    # Subtle divider between Arabic and English
-    cur_y += 10
-    draw.line([(width // 2 - 120, cur_y), (width // 2 + 120, cur_y)], fill=(255, 255, 255, 40), width=1)
-    cur_y += 24
+    cur_y += 18
 
-    # Draw English Translation lines (Centered)
+    # Draw English Translation lines (Centered with drop shadow)
     for line in en_lines:
         bbox = draw.textbbox((0, 0), line, font=font_english)
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
-        draw.text((x + 1, cur_y + 1), line, font=font_english, fill=(0, 0, 0, 160))
-        draw.text((x, cur_y), line, font=font_english, fill=(241, 245, 249, 240))
+        for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2), (0, 2)]:
+            draw.text((x + ox, cur_y + oy), line, font=font_english, fill=(0, 0, 0, 220))
+        draw.text((x, cur_y), line, font=font_english, fill=(248, 250, 252, 255))
         cur_y += line_h_en
 
-    # 3. Bottom Branding Watermark
-    if CHANNEL_TAG:
+    # 3. Watermark at Bottom Left
+    watermark_path = ASSETS_DIR / "watermark.png"
+    if watermark_path.exists():
+        try:
+            wm = Image.open(watermark_path).convert("RGBA")
+            wm_size = 140
+            wm = wm.resize((wm_size, wm_size), Image.LANCZOS)
+            wm_x = 60
+            wm_y = height - wm_size - 70
+            canvas.paste(wm, (wm_x, wm_y), wm)
+        except Exception as e:
+            logger.warning(f"Failed to paste watermark: {e}")
+    elif CHANNEL_TAG:
         bbox_tag = draw.textbbox((0, 0), CHANNEL_TAG, font=font_brand)
-        w_tag = bbox_tag[2] - bbox_tag[0]
-        draw.text(((width - w_tag) // 2, height - 80), CHANNEL_TAG, font=font_brand, fill=(226, 232, 240, 180))
+        draw.text((60, height - 90), CHANNEL_TAG, font=font_brand, fill=(226, 232, 240, 200))
 
     return np.array(canvas)
 
