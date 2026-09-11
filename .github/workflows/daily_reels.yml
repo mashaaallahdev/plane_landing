@@ -25,8 +25,12 @@ on:
         description: 'Specific Surah Number (1-114, 0 for random)'
         required: false
         default: '0'
-      ayah:
-        description: 'Specific Start Ayah (0 for random)'
+      start_ayah:
+        description: 'Specific Start Ayah (0 for default)'
+        required: false
+        default: '0'
+      end_ayah:
+        description: 'Specific End Ayah (0 for auto duration)'
         required: false
         default: '0'
 
@@ -71,14 +75,19 @@ jobs:
         run: |
           COUNT="${{ github.event.inputs.count || '1' }}"
           SURAH="${{ github.event.inputs.surah || '0' }}"
-          AYAH="${{ github.event.inputs.ayah || '0' }}"
+          START_AYAH="${{ github.event.inputs.start_ayah || '0' }}"
+          END_AYAH="${{ github.event.inputs.end_ayah || '0' }}"
 
+          CMD="python main.py --mode generate --send-telegram"
           if [ "$SURAH" != "0" ] && [ -n "$SURAH" ]; then
-            if [ "$AYAH" != "0" ] && [ -n "$AYAH" ]; then
-              python main.py --mode generate --surah "$SURAH" --ayah "$AYAH" --send-telegram
-            else
-              python main.py --mode generate --surah "$SURAH" --send-telegram
+            CMD="$CMD --surah $SURAH"
+            if [ "$START_AYAH" != "0" ] && [ -n "$START_AYAH" ]; then
+              CMD="$CMD --start-ayah $START_AYAH"
             fi
+            if [ "$END_AYAH" != "0" ] && [ -n "$END_AYAH" ]; then
+              CMD="$CMD --end-ayah $END_AYAH"
+            fi
+            $CMD
           else
             python main.py --mode batch --count "$COUNT" --send-telegram
           fi

@@ -92,25 +92,59 @@ DAILY_GENERATION_COUNT=10
 CHANNEL_TAG=@QuranInTheSky
 ```
 
-### 3. Generate a Reel Immediately via CLI
-To test generation locally without Telegram:
+### 3. Generate a Reel with Custom Surah & Verse Ranges
+
+You have **4 flexible ways** to generate any Surah and exact verse ranges:
+
+#### Option A: Interactive Wizard (Easiest)
+Run the interactive CLI wizard:
+```bash
+python main.py -i
+# or
+python scripts/generate_custom_reel.py
+```
+It prompts you to choose the Surah (by number or name like `mulk` or `67`), start verse, end verse, and whether to send to Telegram!
+
+#### Option B: Direct Command-Line Flags
 ```bash
 # Random Surah reel (15-90s)
 python main.py --mode generate
 
-# Specific Surah (e.g. Surah 67 Al-Mulk starting from Ayah 1)
-python main.py --mode generate --surah 67 --ayah 1
+# By Surah name or number:
+python main.py --mode generate --surah mulk
+python main.py --mode generate --surah 67
 
-# Generate and send directly to your Telegram chat/channel
-python main.py --mode generate --surah 112 --send-telegram
+# Exact verse range (e.g. Surah Al-Mulk, Ayahs 1 to 5):
+python main.py --mode generate --surah 67 --start-ayah 1 --end-ayah 5
+
+# Exact 90-second range and send directly to Telegram:
+python main.py --mode generate --surah 55 --start-ayah 1 --end-ayah 16 --send-telegram
 ```
-The output video will be saved in `output/`!
+
+#### Option C: Dedicated Custom Reel Script
+```bash
+# Fast custom generation script:
+python scripts/generate_custom_reel.py --surah 67 --start 1 --end 5 --send
+python scripts/generate_custom_reel.py --surah baqarah --start 255 --end 255 --send
+```
 
 ### 4. Run the Telegram Bot & Scheduler
 ```bash
 python main.py --mode bot
 ```
-The bot will listen for commands (`/generate`, `/status`, etc.) and automatically trigger 10 scheduled reel posts per day.
+The bot listens for commands and runs the 10x daily autonomous scheduler.
+Inside any Telegram chat or channel with the bot, you can send:
+- `/generate` — Create a fresh random Reel (15-90s)
+- `/generate <surah>` — Create for a specific Surah by number or name (e.g. `/generate 67` or `/generate mulk`)
+- `/generate <surah> <start_ayah> <end_ayah>` — **Exact verse range!**
+  - `/generate 67 1 5` (Surah Al-Mulk, Ayahs 1 to 5)
+  - `/generate mulk 1 5` (Lookup by Surah name!)
+  - `/generate 55 1 16` (Surah Ar-Rahman, Ayahs 1 to 16, full 90-second reel)
+  - `/generate 2 255 255` (Ayat Al-Kursi)
+  - `/generate 67:1-5` or `/generate 67 1-5`
+- `/surahs [query]` — Browse all Surahs, ayah counts, or search by name (e.g. `/surahs kahf`)
+- `/status` — Live bot uptime, storage, and stats
+- `/daily_batch` — Trigger a 10-reel batch run immediately
 
 ---
 

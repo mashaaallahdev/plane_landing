@@ -45,20 +45,24 @@ class PlaneQuranBot:
         self,
         surah_number: Optional[int] = None,
         start_ayah: Optional[int] = None,
+        end_ayah: Optional[int] = None,
         min_sec: float = MIN_DURATION_SECONDS,
         max_sec: float = MAX_DURATION_SECONDS,
     ) -> tuple[Path, str, dict]:
         """
         Generates a 9:16 vertical video reel with Sheikh Yasir Ad-Dosary's recitation
         and royalty-free airplane landing/takeoff video.
+        Supports explicit Surah and Ayah range [start_ayah, end_ayah].
         Returns (video_path, formatted_caption, quran_data).
         """
-        logger.info(f"Initiating Reel generation (Surah: {surah_number or 'Random'}, Ayah: {start_ayah or 'Auto'})")
+        range_str = f"Ayahs {start_ayah}-{end_ayah}" if end_ayah else f"Ayah {start_ayah or 'Auto'}"
+        logger.info(f"Initiating Reel generation (Surah: {surah_number or 'Random'}, {range_str})")
         
         # 1. Fetch Quran audio segment and metadata
         quran_data = self.quran_service.select_ayah_sequence(
             surah_number=surah_number,
             start_ayah=start_ayah,
+            end_ayah=end_ayah,
             min_sec=min_sec,
             max_sec=max_sec,
         )
@@ -154,24 +158,35 @@ class PlaneQuranBot:
             f"📏 **Reels Length:** 15s to 90s (9:16 vertical HD 1080x1920)\n"
             f"⏰ **Automated Schedule:** 10x daily reels delivered autonomously\n\n"
             f"**Available Commands:**\n"
-            f"• `/generate` - Instantly create and receive a new Reel\n"
-            f"• `/generate <surah> [ayah]` - Generate for a specific Surah (1-114)\n"
-            f"• `/daily_batch` - Run batch generation on demand\n"
-            f"• `/status` - Bot health and generation stats\n"
-            f"• `/help` - Usage instructions and details\n"
+            f"• `/generate` — Create a fresh random Reel\n"
+            f"• `/generate <surah>` — Generate for a specific Surah by number or name (e.g. `/generate 67` or `/generate mulk`)\n"
+            f"• `/generate <surah> <start_ayah> <end_ayah>` — Generate an exact verse range! (e.g. `/generate 67 1 5` or `/generate mulk 1 5`)\n"
+            f"• `/surahs [query]` — Browse all Surahs, ayah counts, or search by name (e.g. `/surahs` or `/surahs rahman`)\n"
+            f"• `/daily_batch` — Run batch generation on demand\n"
+            f"• `/status` — Bot health and generation stats\n"
+            f"• `/help` — Detailed usage instructions\n"
         )
         await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
         help_text = (
-            "🛠️ *Bot Commands & Usage:*\n\n"
+            "🛠️ *Bot Commands & Exact Verse Range Usage:*\n\n"
             "• `/generate`:\n"
-            "Generates a random Surah reel (15s to 90s) with clean airplane landing/takeoff video.\n\n"
-            "• `/generate <surah_number>`:\n"
-            "Generates a reel for the specified Surah number (e.g. `/generate 67` for Al-Mulk).\n\n"
-            "• `/generate <surah_number> <start_ayah>`:\n"
+            "Generates a random Surah reel with clean airplane landing/takeoff footage.\n\n"
+            "• `/generate <surah>`:\n"
+            "Generates for a specific Surah by number or name (e.g. `/generate 67` or `/generate mulk`).\n\n"
+            "• `/generate <surah> <start_ayah>`:\n"
             "Generates starting from a specific Ayah (e.g. `/generate 2 255` for Ayat Al-Kursi).\n\n"
+            "• `/generate <surah> <start_ayah> <end_ayah>`:\n"
+            "Generates an **exact verse range**! Examples:\n"
+            "  - `/generate 67 1 5` (Surah Al-Mulk, Ayahs 1 to 5)\n"
+            "  - `/generate mulk 1 5` (Lookup by Surah name!)\n"
+            "  - `/generate 55 1 16` (Surah Ar-Rahman, Ayahs 1 to 16)\n"
+            "  - `/generate 114 1 6` (Surah An-Naas, full Surah)\n"
+            "  - `/generate 67:1-5` or `/generate 67 1-5` also supported!\n\n"
+            "• `/surahs [query]`:\n"
+            "Browse popular Surahs and verse counts, or search by name/number (e.g. `/surahs kahf`).\n\n"
             "• `/status`:\n"
             "Displays current bot uptime, generation counts, and storage status.\n"
         )
@@ -196,33 +211,125 @@ class PlaneQuranBot:
         )
         await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
-    async def cmd_generate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /generate and /generate <surah> [ayah] for instant on-demand creation."""
-        msg = await update.message.reply_text(
-            "⏳ *Generating your 9:16 Airplane Quran Reel...*\n"
-            f"• Reciter: {RECITER_NAME_EN}\n"
-            "• Fetching authentic Arabic calligraphy, translation & aviation footage...\n"
-            "Please wait 30-60 seconds while your high-definition video is rendered! ✈️✨",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    async def cmd_surahs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Browse or search Surahs with their numbers and total verse counts."""
+        query = " ".join(context.args).strip() if context.args else ""
+        if query:
+            results = self.quran_service.search_surahs(query)[:8]
+            if not results:
+                await update.message.reply_text(f"🔍 No Surahs found matching '{query}'. Try typing a number (1-114) or name (e.g. Mulk, Rahman).")
+                return
+            lines = [f"📖 *Matching Surahs for '{query}':*\n"]
+            for s in results:
+                lines.append(f"• **{s['number']}. {s['englishName']}** ({s['name']}) — {s['numberOfAyahs']} Ayahs")
+                lines.append(f"  👉 `/generate {s['number']} 1 {min(s['numberOfAyahs'], 5)}`\n")
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        else:
+            featured = [
+                (1, "Al-Faatiha", 7),
+                (36, "Yaseen", 83),
+                (55, "Ar-Rahmaan", 78),
+                (56, "Al-Waqi'a", 96),
+                (67, "Al-Mulk", 30),
+                (112, "Al-Ikhlaas", 4),
+                (113, "Al-Falaq", 5),
+                (114, "An-Naas", 6),
+            ]
+            lines = [
+                "📖 *Quran Surahs & Verse Range Guide:*\n",
+                "You can generate ANY Surah (1-114) and ANY exact verse range!\n",
+                "*Examples:*",
+                "• `/generate 67 1 5` (Surah Al-Mulk, Ayahs 1 to 5)",
+                "• `/generate 55 1 16` (Surah Ar-Rahman, Ayahs 1 to 16)",
+                "• `/generate mulk 1 5` (Lookup by name also works!)",
+                "• `/generate 2 255 255` (Ayat Al-Kursi)\n",
+                "*Search any Surah:*",
+                "Type `/surahs <name>` (e.g. `/surahs kahf` or `/surahs 18`)\n",
+                "*Popular Surahs:*",
+            ]
+            for num, name, ayahs in featured:
+                lines.append(f"• **{num}. {name}** ({ayahs} Ayahs) ➔ `/generate {num} 1 {min(ayahs, 5)}`")
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
+    async def cmd_generate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /generate and /generate <surah> [start_ayah] [end_ayah] for instant on-demand creation."""
         # Parse optional arguments
+        surah_info = None
         surah_num = None
         start_ayah = None
+        end_ayah = None
+
         if context.args:
-            try:
-                surah_num = int(context.args[0])
-                if surah_num < 1 or surah_num > 114:
-                    await msg.edit_text("❌ Invalid Surah number. Please choose between 1 and 114.")
-                    return
-            except ValueError:
-                pass
-            
-            if len(context.args) > 1:
+            raw_arg = " ".join(context.args).strip()
+            # Format: "67:1-5" or "mulk:1-5"
+            if ":" in raw_arg:
                 try:
-                    start_ayah = int(context.args[1])
-                except ValueError:
+                    parts = raw_arg.split(":")
+                    surah_token = parts[0].strip()
+                    surah_info = self.quran_service.find_surah(surah_token)
+                    if surah_info:
+                        surah_num = surah_info["number"]
+                    else:
+                        surah_num = int(surah_token)
+                    range_part = parts[1].strip()
+                    if "-" in range_part:
+                        start_ayah = int(range_part.split("-")[0].strip())
+                        end_ayah = int(range_part.split("-")[1].strip())
+                    else:
+                        start_ayah = int(range_part)
+                except Exception:
                     pass
+            elif len(context.args) == 2 and "-" in context.args[1]:
+                try:
+                    surah_token = context.args[0]
+                    surah_info = self.quran_service.find_surah(surah_token)
+                    surah_num = surah_info["number"] if surah_info else int(surah_token)
+                    start_ayah = int(context.args[1].split("-")[0].strip())
+                    end_ayah = int(context.args[1].split("-")[1].strip())
+                except Exception:
+                    pass
+            else:
+                try:
+                    if len(context.args) >= 1:
+                        surah_token = context.args[0]
+                        surah_info = self.quran_service.find_surah(surah_token)
+                        surah_num = surah_info["number"] if surah_info else int(surah_token)
+                    if len(context.args) >= 2:
+                        start_ayah = int(context.args[1])
+                    if len(context.args) >= 3:
+                        end_ayah = int(context.args[2])
+                except Exception:
+                    pass
+
+        if surah_num is not None:
+            if surah_num < 1 or surah_num > 114:
+                await update.message.reply_text("❌ Invalid Surah number. Please choose between 1 and 114. Use `/surahs` to browse.")
+                return
+            surah_info = self.quran_service.get_surah_info(surah_num)
+
+        if surah_info and start_ayah is not None:
+            max_ayah = surah_info["numberOfAyahs"]
+            if start_ayah > max_ayah:
+                await update.message.reply_text(f"❌ Surah {surah_info['englishName']} only has {max_ayah} Ayahs. Starting Ayah cannot be {start_ayah}.")
+                return
+            if end_ayah is not None and end_ayah > max_ayah:
+                end_ayah = max_ayah
+
+        if start_ayah is not None and end_ayah is not None and start_ayah > end_ayah:
+            await update.message.reply_text("❌ Invalid range: Starting Ayah must be less than or equal to Ending Ayah.")
+            return
+
+        range_desc = f"Ayahs {start_ayah}-{end_ayah}" if end_ayah else (f"Ayah {start_ayah}" if start_ayah else "Auto Ayahs")
+        surah_desc = f"Surah {surah_info['englishName']} ({surah_info['name']})" if surah_info else (f"Surah {surah_num}" if surah_num else "Random Surah")
+
+        msg = await update.message.reply_text(
+            f"⏳ *Generating your 9:16 Airplane Quran Reel...*\n"
+            f"• Target: {surah_desc} ({range_desc})\n"
+            f"• Reciter: {RECITER_NAME_EN}\n"
+            "• Fetching Arabic calligraphy with Harkat & aviation footage...\n"
+            "Please wait 30-90 seconds while your high-definition video is rendered! ✈️✨",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
         try:
             # Run blocking video generation in background thread pool to avoid blocking asyncio event loop
@@ -232,6 +339,7 @@ class PlaneQuranBot:
                 self.generate_single_reel,
                 surah_num,
                 start_ayah,
+                end_ayah,
                 MIN_DURATION_SECONDS,
                 MAX_DURATION_SECONDS,
             )
@@ -302,6 +410,8 @@ class PlaneQuranBot:
         app.add_handler(CommandHandler("help", self.cmd_help))
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("generate", self.cmd_generate))
+        app.add_handler(CommandHandler("surahs", self.cmd_surahs))
+        app.add_handler(CommandHandler("list", self.cmd_surahs))
         app.add_handler(CommandHandler("daily_batch", self.cmd_daily_batch))
 
         # Start daily 10x scheduler

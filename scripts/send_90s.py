@@ -19,9 +19,17 @@ chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
 async def send():
     bot = Bot(token=token)
-    video_path = Path("output/reel_ar_rahmaan_90s_compressed.mp4")
+    if len(sys.argv) > 1:
+        video_path = Path(sys.argv[1])
+    else:
+        video_path = Path("output/reel_ar_rahmaan_90s_compressed.mp4")
+        if not video_path.exists():
+            mp4_files = sorted(Path("output").glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if mp4_files:
+                video_path = mp4_files[0]
+
     if not video_path.exists():
-        print("Video file not found!")
+        print(f"Video file not found at {video_path}!")
         return
 
     caption = (

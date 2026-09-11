@@ -41,6 +41,40 @@ class QuranService:
             raise ValueError(f"Invalid surah number {surah_number}. Must be between 1 and 114.")
         return self.surahs_data[surah_number]
 
+    def find_surah(self, query: str | int) -> Optional[dict]:
+        """Find a surah by number or name (English or Arabic partial match)."""
+        if not query:
+            return None
+        # Check numeric
+        q_str = str(query).strip().lower()
+        if q_str.isdigit():
+            num = int(q_str)
+            return self.surahs_data.get(num)
+
+        # Normalize query (strip 'al-', 'surah', hyphens, spaces)
+        clean_q = q_str.replace("surah", "").replace("al-", "").replace("an-", "").replace("ar-", "").replace("as-", "").replace("at-", "").replace("az-", "").replace("-", "").replace(" ", "")
+        
+        for num, info in self.surahs_data.items():
+            en_name = info.get("englishName", "").lower().replace("-", "").replace(" ", "")
+            en_clean = en_name.replace("al", "").replace("an", "").replace("ar", "").replace("as", "").replace("at", "").replace("az", "")
+            tr_name = info.get("englishNameTranslation", "").lower().replace("-", "").replace(" ", "")
+            ar_name = info.get("name", "")
+            if clean_q in en_name or clean_q in en_clean or clean_q in tr_name or clean_q in ar_name:
+                return info
+        return None
+
+    def search_surahs(self, query: str = "") -> List[dict]:
+        """Search or list surahs matching query."""
+        if not query:
+            return list(self.surahs_data.values())
+        res = []
+        clean_q = query.strip().lower()
+        for num, info in self.surahs_data.items():
+            if clean_q in str(num) or clean_q in info.get("englishName", "").lower() or clean_q in info.get("englishNameTranslation", "").lower() or clean_q in info.get("name", ""):
+                res.append(info)
+        return res
+
+
     def get_audio_path(self, surah: int, ayah: int) -> Path:
         filename = f"{surah:03d}{ayah:03d}.mp3"
         return QURAN_CACHE_DIR / filename
@@ -111,12 +145,15 @@ class QuranService:
         self,
         surah_number: Optional[int] = None,
         start_ayah: Optional[int] = None,
+        end_ayah: Optional[int] = None,
         min_sec: float = MIN_DURATION_SECONDS,
         max_sec: float = MAX_DURATION_SECONDS,
     ) -> dict:
         """
-        Selects a sequence of consecutive ayahs matching duration constraints [min_sec, max_sec].
-        If surah_number is not provided, randomly selects a surah from 1 to 114.
+        Selects a sequence of consecutive ayahs.
+        - If both start_ayah and end_ayah are provided, fetches that exact verse range [start_ayah, end_ayah].
+        - If end_ayah is None, automatically accumulates consecutive ayahs to fit [min_sec, max_sec].
+        - If surah_number is not provided, randomly selects a surah from 1 to 114.
         """
         if surah_number is None:
             surah_number = random.randint(1, 114)
@@ -124,31 +161,20 @@ class QuranService:
         surah_info = self.get_surah_info(surah_number)
         total_ayahs = surah_info["numberOfAyahs"]
 
-        if start_ayah is None or start_ayah < 1 or start_ayah > total_ayahs:
-            start_ayah = random.randint(1, total_ayahs)
-
         selected_ayahs = []
-        current_duration = 0.0
 
-        attempts = 0
-        while attempts < 8:
-            selected_ayahs = []
-            current_duration = 0.0
-            curr = start_ayah
+        # Explicit verse range requested: [start_ayah, end_ayah]
+        if end_ayah is not None:
+            if start_ayah is None or start_ayah < 1:
+                start_ayah = 1
+            start_ayah = min(start_ayah, total_ayahs)
+            end_ayah = max(start_ayah, min(int(end_ayah), total_ayahs))
+            logger.info(f"Fetching exact verse range: Surah {surah_number} ({surah_info['englishName']}) Ayahs {start_ayah} to {end_ayah}")
 
-            while curr <= total_ayahs and current_duration < max_sec:
-                try:
-                    audio_path = self.download_ayah_audio(surah_number, curr)
-                    dur = self.get_ayah_duration(audio_path)
-                except Exception as e:
-                    logger.warning(f"Could not load audio for {surah_number}:{curr}: {e}")
-                    break
-
-                if current_duration + dur > max_sec and len(selected_ayahs) > 0:
-                    break
-
+            for curr in range(start_ayah, end_ayah + 1):
+                audio_path = self.download_ayah_audio(surah_number, curr)
+                dur = self.get_ayah_duration(audio_path)
                 arabic_text, english_text = self.fetch_ayah_text(surah_number, curr)
-                
                 selected_ayahs.append({
                     "ayah_number": curr,
                     "arabic_text": arabic_text,
@@ -156,28 +182,59 @@ class QuranService:
                     "audio_path": str(audio_path),
                     "duration": dur,
                 })
-                current_duration += dur
-                curr += 1
+        else:
+            # Automatic duration-based accumulation within [min_sec, max_sec]
+            if start_ayah is None or start_ayah < 1 or start_ayah > total_ayahs:
+                start_ayah = random.randint(1, total_ayahs)
+
+            current_duration = 0.0
+            attempts = 0
+            while attempts < 8:
+                selected_ayahs = []
+                current_duration = 0.0
+                curr = start_ayah
+
+                while curr <= total_ayahs and current_duration < max_sec:
+                    try:
+                        audio_path = self.download_ayah_audio(surah_number, curr)
+                        dur = self.get_ayah_duration(audio_path)
+                    except Exception as e:
+                        logger.warning(f"Could not load audio for {surah_number}:{curr}: {e}")
+                        break
+
+                    if current_duration + dur > max_sec and len(selected_ayahs) > 0:
+                        break
+
+                    arabic_text, english_text = self.fetch_ayah_text(surah_number, curr)
+                    
+                    selected_ayahs.append({
+                        "ayah_number": curr,
+                        "arabic_text": arabic_text,
+                        "english_text": english_text,
+                        "audio_path": str(audio_path),
+                        "duration": dur,
+                    })
+                    current_duration += dur
+                    curr += 1
+
+                    if current_duration >= min_sec:
+                        break
 
                 if current_duration >= min_sec:
                     break
 
-            if current_duration >= min_sec:
-                break
+                # If not reached min_sec and curr > total_ayahs, shift starting ayah backward
+                if start_ayah > 1:
+                    start_ayah = max(1, start_ayah - 2)
+                else:
+                    if current_duration >= 10.0:
+                        break
+                    surah_number = random.randint(1, 114)
+                    surah_info = self.get_surah_info(surah_number)
+                    total_ayahs = surah_info["numberOfAyahs"]
+                    start_ayah = random.randint(1, total_ayahs)
 
-            # If not reached min_sec and curr > total_ayahs, shift starting ayah backward
-            if start_ayah > 1:
-                start_ayah = max(1, start_ayah - 2)
-            else:
-                # If we are at Ayah 1 and still under min_sec, accept if >= 10s or try another surah
-                if current_duration >= 10.0:
-                    break
-                surah_number = random.randint(1, 114)
-                surah_info = self.get_surah_info(surah_number)
-                total_ayahs = surah_info["numberOfAyahs"]
-                start_ayah = random.randint(1, total_ayahs)
-
-            attempts += 1
+                attempts += 1
 
         if not selected_ayahs:
             raise RuntimeError(f"Could not construct valid ayah sequence for Surah {surah_number}")
