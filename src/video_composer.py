@@ -309,13 +309,19 @@ class VideoComposer:
         filename = f"reel_{surah_slug}_s{quran_data['surah_number']}_a{quran_data['start_ayah']}_{timestamp_str}.mp4"
         output_file = OUTPUT_DIR / filename
 
-        logger.info(f"Rendering video to {output_file} at {VIDEO_FPS} fps...")
+        # Dynamically calculate video bitrate so file stays strictly under Telegram's 50MB limit (target max 40MB)
+        target_max_mb = 40.0
+        target_bitrate_kbps = int((target_max_mb * 8 * 1024) / max(1.0, total_duration)) - 192
+        safe_bitrate = max(1800, min(target_bitrate_kbps, 4000))
+        bitrate_str = f"{safe_bitrate}k"
+
+        logger.info(f"Rendering video to {output_file} at {VIDEO_FPS} fps (Bitrate: {bitrate_str})...")
         final_video.write_videofile(
             str(output_file),
             fps=VIDEO_FPS,
             codec="libx264",
             audio_codec="aac",
-            bitrate="5000k",
+            bitrate=bitrate_str,
             audio_bitrate="192k",
             preset="fast",
             threads=4,
