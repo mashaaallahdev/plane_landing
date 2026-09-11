@@ -1,0 +1,28 @@
+# Environment secrets
+.env
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Runtime and cache data
+data/quran_cache/*.mp3
+data/quran_cache/*.json
+assets/videos/cache/*
+output/*.mp4
+output/*.jpg
+output/*.png
+bin/
+
+# Keep directories with .gitkeep
+!data/quran_cache/.gitkeep
+!assets/videos/cache/.gitkeep
+!output/.gitkeep
+
+# IDE files
+.idea/
+.vscode/
+*.swp

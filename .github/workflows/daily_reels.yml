@@ -1,0 +1,92 @@
+name: Daily 10x Quran Reels Generator
+
+on:
+  schedule:
+    # 10 automated generation runs daily distributed across 24 hours:
+    # 00:00, 02:24, 04:48, 07:12, 09:36, 12:00, 14:24, 16:48, 19:12, 21:36 UTC
+    - cron: '0 0 * * *'
+    - cron: '24 2 * * *'
+    - cron: '48 4 * * *'
+    - cron: '12 7 * * *'
+    - cron: '36 9 * * *'
+    - cron: '0 12 * * *'
+    - cron: '24 14 * * *'
+    - cron: '48 16 * * *'
+    - cron: '12 19 * * *'
+    - cron: '36 21 * * *'
+
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'Number of Reels to generate'
+        required: false
+        default: '1'
+      surah:
+        description: 'Specific Surah Number (1-114, 0 for random)'
+        required: false
+        default: '0'
+      ayah:
+        description: 'Specific Start Ayah (0 for random)'
+        required: false
+        default: '0'
+
+jobs:
+  generate_and_publish:
+    name: Generate & Dispatch Reel to Telegram
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Dependencies (FFmpeg & Fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-liberation
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Pre-download Typography Fonts
+        run: |
+          python -m src.font_manager
+
+      - name: Execute Reel Generation & Telegram Dispatch
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          MIN_DURATION_SECONDS: 15
+          MAX_DURATION_SECONDS: 90
+        run: |
+          COUNT="${{ github.event.inputs.count || '1' }}"
+          SURAH="${{ github.event.inputs.surah || '0' }}"
+          AYAH="${{ github.event.inputs.ayah || '0' }}"
+
+          if [ "$SURAH" != "0" ] && [ -n "$SURAH" ]; then
+            if [ "$AYAH" != "0" ] && [ -n "$AYAH" ]; then
+              python main.py --mode generate --surah "$SURAH" --ayah "$AYAH" --send-telegram
+            else
+              python main.py --mode generate --surah "$SURAH" --send-telegram
+            fi
+          else
+            python main.py --mode batch --count "$COUNT" --send-telegram
+          fi
+
+      - name: Archive Generated Reels as Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generated-reels-${{ github.run_id }}
+          path: output/*.mp4
+          retention-days: 7
