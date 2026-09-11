@@ -353,13 +353,13 @@ class VideoComposer:
             safe_bitrate = max(1800, min(target_bitrate_kbps, 4000))
             bitrate_str = f"{safe_bitrate}k"
 
-            # 4. Build FFmpeg command with fast concat stream (8x faster than multi-pass overlays)
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            ffmpeg_exe = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
             cmd = [
                 ffmpeg_exe, "-y",
                 "-stream_loop", "-1",
                 "-i", str(video_path),
                 "-i", str(quran_data["combined_audio_path"]),
+                "-loop", "1",
                 "-i", str(grad_path),
             ]
 
@@ -372,7 +372,7 @@ class VideoComposer:
             filters = [
                 f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},setsar=1[bg]",
                 f"{concat_ins}concat=n={len(ayah_inputs)}:v=1:a=0,format=rgba[subtitles]",
-                "[bg][2:v]overlay=0:0[bg_grad]",
+                "[bg][2:v]overlay=0:0:shortest=1[bg_grad]",
                 "[bg_grad][subtitles]overlay=0:0[outv]",
                 f"[1:a]afade=t=in:ss=0:d=0.4,afade=t=out:st={fade_out_start:.3f}:d=0.8[a]",
             ]
@@ -411,109 +411,12 @@ class VideoComposer:
             except Exception:
                 pass
 
-    def compose_reel_moviepy(self, video_path: Path, quran_data: dict) -> Path:
-        """
-        Fallback MoviePy compositor.
-        """
-        total_duration = quran_data["total_duration"]
-        logger.info(f"Composing 9:16 Reel via MoviePy for Surah {quran_data['surah_name_en']} (Duration: {total_duration:.2f}s)")
-
-        # 1. Prepare Background Video
-        bg_clip = self.process_background_video(video_path, total_duration)
-
-        # 2. Gradient Vignette Overlay
-        grad_img = create_gradient_mask(VIDEO_WIDTH, VIDEO_HEIGHT)
-        grad_arr = np.array(grad_img)
-        grad_clip = mp.ImageClip(grad_arr).set_duration(total_duration)
-
-        # 3. Synchronized Ayah Overlays
-        surah_en = quran_data["surah_name_en"]
-        surah_ar = quran_data["surah_name_ar"]
-        ayahs: List[dict] = quran_data["ayahs"]
-        
-        overlay_clips = []
-        for a in ayahs:
-            start_t = a["start_time"]
-            end_t = min(a["end_time"], total_duration)
-            dur = max(0.1, end_t - start_t)
-
-            frame_arr = render_ayah_overlay(
-                ayah_data=a,
-                surah_name_en=surah_en,
-                surah_name_ar=surah_ar,
-                total_ayah_count=quran_data["ayah_count"],
-            )
-
-            # Create ImageClip for this Ayah segment
-            img_clip = (
-                mp.ImageClip(frame_arr)
-                .set_start(start_t)
-                .set_duration(dur)
-            )
-            overlay_clips.append(img_clip)
-
-        # 4. Audio track: Sheikh Yasir Ad-Dosary recitation with subtle audio fades
-        audio_clip = mp.AudioFileClip(str(quran_data["combined_audio_path"]))
-        # Audio fade in (0.4s) and fade out (0.8s)
-        audio_clip = audio_clip.audio_fadein(0.4).audio_fadeout(0.8)
-
-        # 5. Composite Video
-        all_clips = [bg_clip, grad_clip] + overlay_clips
-        final_video = mp.CompositeVideoClip(all_clips, size=(VIDEO_WIDTH, VIDEO_HEIGHT))
-        final_video = final_video.set_duration(total_duration).set_audio(audio_clip)
-
-        # 6. Export Final MP4 File
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        surah_slug = surah_en.lower().replace(" ", "_").replace("-", "_")
-        filename = f"reel_{surah_slug}_s{quran_data['surah_number']}_a{quran_data['start_ayah']}_{timestamp_str}.mp4"
-        output_file = OUTPUT_DIR / filename
-
-        # Dynamically calculate video bitrate so file stays strictly under Telegram's 50MB limit (target max 40MB)
-        target_max_mb = 40.0
-        target_bitrate_kbps = int((target_max_mb * 8 * 1024) / max(1.0, total_duration)) - 192
-        safe_bitrate = max(1800, min(target_bitrate_kbps, 4000))
-        bitrate_str = f"{safe_bitrate}k"
-
-        # Force garbage collection before encoding to give FFmpeg maximum RAM headroom
-        import gc
-        gc.collect()
-
-        logger.info(f"Rendering video to {output_file} at {VIDEO_FPS} fps (Bitrate: {bitrate_str})...")
-        final_video.write_videofile(
-            str(output_file),
-            fps=VIDEO_FPS,
-            codec="libx264",
-            audio_codec="aac",
-            bitrate=bitrate_str,
-            audio_bitrate="192k",
-            preset="veryfast",
-            threads=2,
-            ffmpeg_params=["-max_muxing_queue_size", "1024"],
-            logger=None,  # Suppress internal MoviePy stdout clutter
-        )
-
-        # Clean up clips to free memory
-        final_video.close()
-        bg_clip.close()
-        grad_clip.close()
-        audio_clip.close()
-        for oc in overlay_clips:
-            oc.close()
-
-        logger.info(f"Reel successfully rendered: {output_file}")
-        return output_file
-
     def compose_reel(self, video_path: Path, quran_data: dict) -> Path:
         """
         Assembles the complete 9:16 vertical Facebook Reel video:
-        1. High-performance, low-memory direct FFmpeg engine (default)
-        2. Fallback to MoviePy if needed
+        Uses the high-performance, low-memory direct FFmpeg engine.
         """
-        try:
-            return self.compose_reel_direct_ffmpeg(video_path, quran_data)
-        except Exception as e:
-            logger.warning(f"Direct FFmpeg composition failed ({e}), falling back to MoviePy...")
-            return self.compose_reel_moviepy(video_path, quran_data)
+        return self.compose_reel_direct_ffmpeg(video_path, quran_data)
 
 if __name__ == "__main__":
     import sys
