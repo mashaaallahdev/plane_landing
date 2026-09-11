@@ -27,15 +27,25 @@ from src.font_manager import ensure_fonts
 
 logger = logging.getLogger(__name__)
 
+# Reshaper instance with complete Harakat (Tashkeel) support
+arabic_reshaper_with_harakat = arabic_reshaper.ArabicReshaper(configuration={
+    "delete_harakat": False,
+    "support_ligatures": True,
+})
+
+def reshape_arabic(text: str) -> str:
+    """Reshape Arabic text preserving all harkat (tashkeel/diacritics)."""
+    reshaped = arabic_reshaper_with_harakat.reshape(text)
+    return get_display(reshaped)
+
 def wrap_arabic_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
-    """Wraps Arabic text properly according to measured pixel width."""
+    """Wraps Arabic text properly according to measured pixel width with harkat."""
     words = text.split()
     lines = []
     current_line = []
     for word in words:
         test_line = " ".join(current_line + [word])
-        reshaped = arabic_reshaper.reshape(test_line)
-        bidi = get_display(reshaped)
+        bidi = reshape_arabic(test_line)
         bbox = draw.textbbox((0, 0), bidi, font=font)
         if bbox[2] - bbox[0] <= max_width:
             current_line.append(word)
@@ -84,6 +94,10 @@ def render_ayah_overlay(
 ) -> np.ndarray:
     """
     Renders the graphical overlay for a specific Ayah as an RGBA numpy array.
+    Features:
+    - Glass effect container for Surah Name Header (Top)
+    - Floating Quran Verses with Harkat (Tashkeel) and drop shadows (No glass container)
+    - Custom Watermark at bottom-left
     """
     ensure_fonts()
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -93,58 +107,58 @@ def render_ayah_overlay(
     font_header_title = ImageFont.truetype(str(ENGLISH_FONT_PATH), 32)
     font_header_sub = ImageFont.truetype(str(ENGLISH_FONT_PATH), 24)
     font_header_ar = ImageFont.truetype(str(ARABIC_FONT_PATH), 28)
-    font_arabic = ImageFont.truetype(str(ARABIC_FONT_PATH), 52)
+    font_arabic = ImageFont.truetype(str(ARABIC_FONT_PATH), 54)
     font_english = ImageFont.truetype(str(ENGLISH_FONT_PATH), 32)
     font_brand = ImageFont.truetype(str(ENGLISH_FONT_PATH), 22)
 
-    # 1. Top Header Text (Directly rendered with drop shadows)
+    # 1. Top Header: Glass effect container for Surah Name
+    header_box = (60, 100, width - 60, 220)
+    draw.rounded_rectangle(header_box, radius=24, fill=(15, 23, 42, 190), outline=(255, 255, 255, 40), width=2)
+
     title_en = f"SURAH {surah_name_en.upper()}"
     clean_surah_ar = surah_name_ar.strip()
     if not (clean_surah_ar.startswith("سورة") or clean_surah_ar.startswith("سُورَةُ")):
         clean_surah_ar = f"سورة {clean_surah_ar}"
-    reshaped_surah_ar = get_display(arabic_reshaper.reshape(clean_surah_ar))
+    reshaped_surah_ar = reshape_arabic(clean_surah_ar)
     
-    # English title with shadow
-    draw.text((72, 112), title_en, font=font_header_title, fill=(0, 0, 0, 220))
-    draw.text((70, 110), title_en, font=font_header_title, fill=(255, 255, 255, 255))
+    # English title inside glass container
+    draw.text((90, 122), title_en, font=font_header_title, fill=(255, 255, 255, 255))
     
-    # Arabic Surah Name on the right with shadow
+    # Arabic Surah Name on the right inside glass container
     bbox_ar = draw.textbbox((0, 0), reshaped_surah_ar, font=font_header_ar)
     w_ar = bbox_ar[2] - bbox_ar[0]
-    draw.text((width - 70 - w_ar + 2, 112), reshaped_surah_ar, font=font_header_ar, fill=(0, 0, 0, 220))
-    draw.text((width - 70 - w_ar, 110), reshaped_surah_ar, font=font_header_ar, fill=(245, 158, 11, 255)) # Amber/Gold
+    draw.text((width - 90 - w_ar, 124), reshaped_surah_ar, font=font_header_ar, fill=(245, 158, 11, 255)) # Amber/Gold
 
     # Subtitle line: Ayah number + Reciter
     ayah_num = ayah_data.get("ayah_number", 1)
     sub_text = f"Ayah {ayah_num}  •  Reciter: {RECITER_NAME_EN}"
-    draw.text((72, 154), sub_text, font=font_header_sub, fill=(0, 0, 0, 220))
-    draw.text((70, 152), sub_text, font=font_header_sub, fill=(203, 213, 225, 230))
+    draw.text((90, 168), sub_text, font=font_header_sub, fill=(203, 213, 225, 230))
 
-    # 2. Main Quran Text (Floating directly over footage with glow & drop shadows)
+    # 2. Main Quran Verse Text: Floating directly over footage (NO glass container, with full Harkat)
     arabic_raw = ayah_data.get("arabic_text", "")
     english_raw = ayah_data.get("english_text", "")
 
-    # Wrap Arabic lines
+    # Wrap Arabic lines (with full harkat)
     ar_lines = wrap_arabic_text(arabic_raw, font_arabic, width - 160, draw)
     
     # Wrap English lines
     en_lines = textwrap.wrap(english_raw, width=42)
 
-    line_h_ar = 80
+    line_h_ar = 82
     line_h_en = 44
     content_h = (len(ar_lines) * line_h_ar) + 20 + (len(en_lines) * line_h_en)
 
     # Position content at comfortable lower-center area
     cur_y = height - 340 - content_h
 
-    # Draw Arabic text lines (Centered with rich multi-directional shadow)
+    # Draw Arabic text lines with Harkat (Centered with rich multi-directional shadow)
     for line in ar_lines:
-        reshaped = get_display(arabic_reshaper.reshape(line))
+        reshaped = reshape_arabic(line)
         bbox = draw.textbbox((0, 0), reshaped, font=font_arabic)
         w = bbox[2] - bbox[0]
         x = (width - w) // 2
 
-        # Multi-layer outer shadow for high readability on any sky/ground background
+        # Multi-layer outer shadow for high readability on any background
         for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2), (0, 3), (0, -3), (3, 0), (-3, 0)]:
             draw.text((x + ox, cur_y + oy), reshaped, font=font_arabic, fill=(0, 0, 0, 240))
         # Warm ivory glowing Arabic text
